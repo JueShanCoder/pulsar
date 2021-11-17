@@ -28,6 +28,7 @@
     <module>mariadb</module>
     <module>postgres</module>
     <module>sqlite</module>
+    <module>tdengine</module>
   </modules>
   <parent>
     <groupId>org.apache.pulsar</groupId>
