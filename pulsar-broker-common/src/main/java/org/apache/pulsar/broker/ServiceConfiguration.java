@@ -573,6 +573,14 @@ public class ServiceConfiguration implements PulsarConfiguration {
     private int brokerMaxConnectionsPerIp = 0;
 
     @FieldContext(
+        category = CATEGORY_POLICIES,
+        dynamic = true,
+        doc = "Allow schema to be auto updated at broker level. User can override this by 'is_allow_auto_update_schema'"
+            + " of namespace policy. This is enabled by default."
+    )
+    private boolean isAllowAutoUpdateSchemaEnabled = true;
+
+    @FieldContext(
         category = CATEGORY_SERVER,
         dynamic = true,
         doc = "Enable check for minimum allowed client library version"
@@ -778,6 +786,27 @@ public class ServiceConfiguration implements PulsarConfiguration {
             + " will backoff the batch size to this minimum number."
     )
     private int dispatcherMinReadBatchSize = 1;
+
+    @FieldContext(
+        dynamic = true,
+        category = CATEGORY_SERVER,
+        doc = "The read failure backoff initial time in milliseconds. By default it is 15s."
+    )
+    private int dispatcherReadFailureBackoffInitialTimeInMs = 15000;
+
+    @FieldContext(
+        dynamic = true,
+        category = CATEGORY_SERVER,
+        doc = "The read failure backoff max time in milliseconds. By default it is 60s."
+    )
+    private int dispatcherReadFailureBackoffMaxTimeInMs = 60000;
+
+    @FieldContext(
+        dynamic = true,
+        category = CATEGORY_SERVER,
+        doc = "The read failure backoff mandatory stop time in milliseconds. By default it is 0s."
+    )
+    private int dispatcherReadFailureBackoffMandatoryStopTimeInMs = 0;
 
     @FieldContext(
         dynamic = true,
@@ -1013,6 +1042,13 @@ public class ServiceConfiguration implements PulsarConfiguration {
             category = CATEGORY_SERVER,
             doc = "Enable or disable system topic.")
     private boolean systemTopicEnabled = false;
+
+    @FieldContext(
+            category = CATEGORY_SCHEMA,
+            doc = "The schema compatibility strategy to use for system topics"
+    )
+    private SchemaCompatibilityStrategy systemTopicSchemaCompatibilityStrategy =
+            SchemaCompatibilityStrategy.ALWAYS_COMPATIBLE;
 
     @FieldContext(
         category = CATEGORY_SERVER,
@@ -1975,10 +2011,9 @@ public class ServiceConfiguration implements PulsarConfiguration {
 
     @FieldContext(
             category = CATEGORY_SCHEMA,
-            doc = "The schema compatibility strategy in broker level. If this config in namespace policy is `UNDEFINED`"
-                    + ", schema compatibility strategy check will use it in broker level."
+            doc = "The schema compatibility strategy in broker level"
     )
-    private SchemaCompatibilityStrategy schemaCompatibilityStrategy = SchemaCompatibilityStrategy.UNDEFINED;
+    private SchemaCompatibilityStrategy schemaCompatibilityStrategy = SchemaCompatibilityStrategy.FULL;
 
     /**** --- WebSocket --- ****/
     @FieldContext(
@@ -2400,4 +2435,10 @@ public class ServiceConfiguration implements PulsarConfiguration {
         }
     }
 
+    public SchemaCompatibilityStrategy getSchemaCompatibilityStrategy() {
+        if (SchemaCompatibilityStrategy.isUndefined(schemaCompatibilityStrategy)) {
+            return SchemaCompatibilityStrategy.FULL;
+        }
+        return schemaCompatibilityStrategy;
+    }
 }

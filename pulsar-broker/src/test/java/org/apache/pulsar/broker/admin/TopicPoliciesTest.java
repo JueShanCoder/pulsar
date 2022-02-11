@@ -44,7 +44,9 @@ import org.apache.pulsar.broker.ConfigHelper;
 import org.apache.pulsar.broker.auth.MockedPulsarServiceBaseTest;
 import org.apache.pulsar.broker.namespace.NamespaceService;
 import org.apache.pulsar.broker.service.BacklogQuotaManager;
+import org.apache.pulsar.broker.service.AbstractTopic;
 import org.apache.pulsar.broker.service.PublishRateLimiterImpl;
+import org.apache.pulsar.broker.service.SystemTopicBasedTopicPoliciesService;
 import org.apache.pulsar.broker.service.Topic;
 import org.apache.pulsar.broker.service.persistent.DispatchRateLimiter;
 import org.apache.pulsar.broker.service.persistent.PersistentTopic;
@@ -63,6 +65,8 @@ import org.apache.pulsar.client.api.SubscriptionMode;
 import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.common.api.proto.CommandSubscribe;
 import org.apache.pulsar.common.events.EventsTopicNames;
+import org.apache.pulsar.common.naming.NamespaceName;
+import org.apache.pulsar.common.naming.TopicDomain;
 import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.policies.data.BacklogQuota;
 import org.apache.pulsar.common.policies.data.ClusterData;
@@ -123,6 +127,47 @@ public class TopicPoliciesTest extends MockedPulsarServiceBaseTest {
     public void cleanup() throws Exception {
         super.internalCleanup();
         this.resetConfig();
+    }
+
+    @Test
+    public void testTopicPolicyInitialValueWithNamespaceAlreadyLoaded() throws Exception{
+        TopicName topicName = TopicName.get(
+                TopicDomain.persistent.value(),
+                NamespaceName.get(myNamespace),
+                "test-" + UUID.randomUUID()
+        );
+        String topic = topicName.toString();
+
+        SystemTopicBasedTopicPoliciesService policyService =
+                (SystemTopicBasedTopicPoliciesService) pulsar.getTopicPoliciesService();
+
+        //set up topic with inactiveTopicPolicies.maxInactiveDurationSeconds = 100
+        InactiveTopicPolicies inactiveTopicPolicies =
+                new InactiveTopicPolicies(InactiveTopicDeleteMode.delete_when_subscriptions_caught_up, 100, true);
+        admin.topics().createNonPartitionedTopic(topic);
+        admin.topicPolicies().setInactiveTopicPolicies(topic, inactiveTopicPolicies);
+
+        //wait until topic loaded with right policy value.
+        Awaitility.await().untilAsserted(()-> {
+            AbstractTopic topic1 = (AbstractTopic) pulsar.getBrokerService().getTopic(topic, true).get().get();
+            assertEquals(topic1.getInactiveTopicPolicies().getMaxInactiveDurationSeconds(), 100);
+        });
+        //unload the topic
+        pulsar.getNamespaceService().unloadNamespaceBundle(pulsar.getNamespaceService().getBundle(topicName)).get();
+        assertFalse(pulsar.getBrokerService().getTopics().containsKey(topic));
+
+        //load the nameserver, but topic is not init.
+        log.info("lookup:{}",admin.lookups().lookupTopic(topic));
+        assertTrue(pulsar.getBrokerService().isTopicNsOwnedByBroker(topicName));
+        assertFalse(pulsar.getBrokerService().getTopics().containsKey(topic));
+        //make sure namespace policy reader is fully started.
+        Awaitility.await().untilAsserted(()-> {
+            assertTrue(policyService.getPoliciesCacheInit(topicName.getNamespaceObject()));
+        });
+
+        //load the topic.
+        AbstractTopic topic1 = (AbstractTopic) pulsar.getBrokerService().getTopic(topic, true).get().get();
+        assertEquals(topic1.getInactiveTopicPolicies().getMaxInactiveDurationSeconds(), 100);
     }
 
     @Test
@@ -1397,7 +1442,7 @@ public class TopicPoliciesTest extends MockedPulsarServiceBaseTest {
 
     @Test
     public void testCheckMaxConsumers() throws Exception {
-        Integer maxProducers = new Integer(-1);
+        Integer maxProducers = -1;
         log.info("MaxConsumers: {} will set to the topic: {}", maxProducers, testTopic);
         try {
             admin.topics().setMaxConsumers(testTopic, maxProducers);
@@ -2643,4 +2688,27 @@ public class TopicPoliciesTest extends MockedPulsarServiceBaseTest {
         });
     }
 
+    @Test
+    public void testLoopCreateAndDeleteTopicPolicies() throws Exception {
+        final String topic = testTopic + UUID.randomUUID();
+
+        int n = 0;
+        while (n < 2) {
+            n++;
+            pulsarClient.newProducer().topic(topic).create().close();
+            Awaitility.await().untilAsserted(() -> {
+                Assertions.assertThat(pulsar.getTopicPoliciesService().getTopicPolicies(TopicName.get(topic))).isNull();
+            });
+
+            admin.topics().setMaxConsumersPerSubscription(topic, 1);
+            Awaitility.await().untilAsserted(() -> {
+                Assertions.assertThat(pulsar.getTopicPoliciesService().getTopicPolicies(TopicName.get(topic))).isNotNull();
+            });
+
+            admin.topics().delete(topic);
+            Awaitility.await().untilAsserted(() -> {
+                Assertions.assertThat(pulsar.getTopicPoliciesService().getTopicPolicies(TopicName.get(topic))).isNull();
+            });
+        }
+    }
 }

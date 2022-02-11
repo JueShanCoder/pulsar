@@ -62,6 +62,13 @@ public interface TopicPoliciesService {
     TopicPolicies getTopicPolicies(TopicName topicName) throws TopicPoliciesCacheNotInitException;
 
     /**
+     * Get policies from current cache.
+     * @param topicName topic name
+     * @return the topic policies
+     */
+    TopicPolicies getTopicPoliciesIfExists(TopicName topicName);
+
+    /**
      * When getting TopicPolicies, if the initialization has not been completed,
      * we will go back off and try again until time out.
      * @param topicName topic name
@@ -78,11 +85,13 @@ public interface TopicPoliciesService {
                 .create() : backoff;
         try {
             RetryUtil.retryAsynchronously(() -> {
+                CompletableFuture<Optional<TopicPolicies>> future = new CompletableFuture<>();
                 try {
-                    return Optional.ofNullable(getTopicPolicies(topicName));
+                    future.complete(Optional.ofNullable(getTopicPolicies(topicName)));
                 } catch (BrokerServiceException.TopicPoliciesCacheNotInitException exception) {
-                    throw new RuntimeException(exception);
+                    future.completeExceptionally(exception);
                 }
+                return future;
             }, usedBackoff, scheduledExecutorService, response);
         } catch (Exception e) {
             response.completeExceptionally(e);
@@ -142,6 +151,11 @@ public interface TopicPoliciesService {
 
         @Override
         public TopicPolicies getTopicPolicies(TopicName topicName) throws TopicPoliciesCacheNotInitException {
+            return null;
+        }
+
+        @Override
+        public TopicPolicies getTopicPoliciesIfExists(TopicName topicName) {
             return null;
         }
 

@@ -16,16 +16,37 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
+package org.apache.pulsar.broker.transaction.exception.pendingack;
+
+import org.apache.pulsar.broker.transaction.exception.TransactionException;
 
 /**
- * Exception is thrown when no transactions found committed at a given ledger.
+ * The base exception class for the errors thrown from Transaction Pending ACk.
  */
-public class NoTxnsCommittedAtLedgerException extends TransactionBufferException {
+public abstract class TransactionPendingAckException extends TransactionException {
 
     private static final long serialVersionUID = 0L;
 
-    public NoTxnsCommittedAtLedgerException(String message) {
+    public TransactionPendingAckException(String message) {
         super(message);
+    }
+
+    public TransactionPendingAckException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    public TransactionPendingAckException(Throwable cause) {
+        super(cause);
+    }
+
+    /**
+     * Transaction pending ack store provider exception.
+     */
+    public static class TransactionPendingAckStoreProviderException extends TransactionPendingAckException {
+
+        public TransactionPendingAckStoreProviderException(String message) {
+            super(message);
+        }
+
     }
 }

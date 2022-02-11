@@ -16,18 +16,23 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
+package org.apache.pulsar.proxy.server;
 
-/**
- * Exception thrown if a transaction is already sealed.
- *
- * <p>If a transaction is sealed, no more entries should be appended to this transaction.
- */
-public class TransactionSealedException extends TransactionBufferException {
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertTrue;
+import org.testng.annotations.Test;
 
-    private static final long serialVersionUID = 5366602873819540477L;
+public class ProxyConnectionTest {
 
-    public TransactionSealedException(String message) {
-        super(message);
+    @Test
+    public void testMatchesHostAndPort() {
+        assertTrue(ProxyConnection
+                .matchesHostAndPort("pulsar://", "pulsar://1.2.3.4:6650", "1.2.3.4:6650"));
+        assertTrue(ProxyConnection
+                .matchesHostAndPort("pulsar+ssl://", "pulsar+ssl://1.2.3.4:6650", "1.2.3.4:6650"));
+        assertFalse(ProxyConnection
+                .matchesHostAndPort("pulsar://", "pulsar://1.2.3.4:12345", "5.6.7.8:1234"));
+        assertFalse(ProxyConnection
+                .matchesHostAndPort("pulsar://", "pulsar://1.2.3.4:12345", "1.2.3.4:1234"));
     }
 }

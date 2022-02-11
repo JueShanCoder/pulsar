@@ -30,7 +30,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -48,6 +47,7 @@ import org.apache.pulsar.broker.service.schema.BookkeeperSchemaStorage;
 import org.apache.pulsar.broker.service.schema.SchemaRegistryService;
 import org.apache.pulsar.broker.service.schema.exceptions.IncompatibleSchemaException;
 import org.apache.pulsar.broker.stats.prometheus.metrics.Summary;
+import org.apache.pulsar.broker.systopic.SystemTopicClient;
 import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.policies.data.InactiveTopicDeleteMode;
 import org.apache.pulsar.common.policies.data.InactiveTopicPolicies;
@@ -93,9 +93,11 @@ public abstract class AbstractTopic implements Topic {
 
     // Whether messages published must be encrypted or not in this topic
     protected volatile boolean isEncryptionRequired = false;
+
+    @Getter
     protected volatile SchemaCompatibilityStrategy schemaCompatibilityStrategy =
             SchemaCompatibilityStrategy.FULL;
-    protected volatile boolean isAllowAutoUpdateSchema = true;
+    protected volatile Boolean isAllowAutoUpdateSchema;
     // schema validation enforced flag
     protected volatile boolean schemaValidationEnforced = false;
 
@@ -251,6 +253,14 @@ public abstract class AbstractTopic implements Topic {
         return subscription.addConsumer(consumer);
     }
 
+    protected Consumer getActiveConsumer(Subscription subscription) {
+        Dispatcher dispatcher = subscription.getDispatcher();
+        if (dispatcher instanceof AbstractDispatcherSingleActiveConsumer) {
+            return ((AbstractDispatcherSingleActiveConsumer) dispatcher).getActiveConsumer();
+        }
+        return null;
+    }
+
     @Override
     public void disableCnxAutoRead() {
         producers.values().forEach(producer -> producer.getCnx().disableCnxAutoRead());
@@ -262,14 +272,15 @@ public abstract class AbstractTopic implements Topic {
     }
 
     protected boolean hasLocalProducers() {
-        AtomicBoolean foundLocal = new AtomicBoolean(false);
-        producers.values().forEach(producer -> {
+        if (producers.isEmpty()) {
+            return false;
+        }
+        for (Producer producer : producers.values()) {
             if (!producer.isRemote()) {
-                foundLocal.set(true);
+                return true;
             }
-        });
-
-        return foundLocal.get();
+        }
+        return false;
     }
 
     @Override
@@ -328,20 +339,28 @@ public abstract class AbstractTopic implements Topic {
         String base = TopicName.get(getName()).getPartitionedTopicName();
         String id = TopicName.get(base).getSchemaName();
         SchemaRegistryService schemaRegistryService = brokerService.pulsar().getSchemaRegistryService();
-        return isAllowAutoUpdateSchema ? schemaRegistryService
-                .putSchemaIfAbsent(id, schema, schemaCompatibilityStrategy)
-                : schemaRegistryService.trimDeletedSchemaAndGetList(id).thenCompose(schemaAndMetadataList ->
-                schemaRegistryService.getSchemaVersionBySchemaData(schemaAndMetadataList, schema)
-                        .thenCompose(schemaVersion -> {
-                    if (schemaVersion == null) {
-                        return FutureUtil
-                                .failedFuture(
-                                        new IncompatibleSchemaException(
-                                                "Schema not found and schema auto updating is disabled."));
-                    } else {
-                        return CompletableFuture.completedFuture(schemaVersion);
-                    }
-                }));
+
+        if (allowAutoUpdateSchema()) {
+            return schemaRegistryService.putSchemaIfAbsent(id, schema, schemaCompatibilityStrategy);
+        } else {
+            return schemaRegistryService.trimDeletedSchemaAndGetList(id).thenCompose(schemaAndMetadataList ->
+                    schemaRegistryService.getSchemaVersionBySchemaData(schemaAndMetadataList, schema)
+                            .thenCompose(schemaVersion -> {
+                                if (schemaVersion == null) {
+                                    return FutureUtil.failedFuture(new IncompatibleSchemaException(
+                                            "Schema not found and schema auto updating is disabled."));
+                                } else {
+                                    return CompletableFuture.completedFuture(schemaVersion);
+                                }
+                            }));
+        }
+    }
+
+    private boolean allowAutoUpdateSchema() {
+        if (isAllowAutoUpdateSchema == null) {
+            return brokerService.pulsar().getConfig().isAllowAutoUpdateSchemaEnabled();
+        }
+        return isAllowAutoUpdateSchema;
     }
 
     @Override
@@ -521,17 +540,22 @@ public abstract class AbstractTopic implements Topic {
     }
 
     protected void setSchemaCompatibilityStrategy(Policies policies) {
-        if (policies.schema_compatibility_strategy == SchemaCompatibilityStrategy.UNDEFINED) {
-            schemaCompatibilityStrategy = brokerService.pulsar()
-                    .getConfig().getSchemaCompatibilityStrategy();
-            if (schemaCompatibilityStrategy == SchemaCompatibilityStrategy.UNDEFINED) {
-                schemaCompatibilityStrategy = SchemaCompatibilityStrategy.fromAutoUpdatePolicy(
-                        policies.schema_auto_update_compatibility_strategy);
+        if (SystemTopicClient.isSystemTopic(TopicName.get(this.topic))) {
+            schemaCompatibilityStrategy =
+                    brokerService.pulsar().getConfig().getSystemTopicSchemaCompatibilityStrategy();
+            return;
+        }
+
+        schemaCompatibilityStrategy = policies.schema_compatibility_strategy;
+        if (SchemaCompatibilityStrategy.isUndefined(schemaCompatibilityStrategy)) {
+            schemaCompatibilityStrategy = SchemaCompatibilityStrategy.fromAutoUpdatePolicy(
+                    policies.schema_auto_update_compatibility_strategy);
+            if (SchemaCompatibilityStrategy.isUndefined(schemaCompatibilityStrategy)) {
+                schemaCompatibilityStrategy = brokerService.pulsar().getConfig().getSchemaCompatibilityStrategy();
             }
-        } else {
-            schemaCompatibilityStrategy = policies.schema_compatibility_strategy;
         }
     }
+
     private static final Summary PUBLISH_LATENCY = Summary.build("pulsar_broker_publish_latency", "-")
             .quantile(0.0)
             .quantile(0.50)
@@ -631,13 +655,9 @@ public abstract class AbstractTopic implements Topic {
 
     private void tryOverwriteOldProducer(Producer oldProducer, Producer newProducer)
             throws BrokerServiceException {
-        boolean canOverwrite = false;
-        if (oldProducer.equals(newProducer) && !isUserProvidedProducerName(oldProducer)
-                && !isUserProvidedProducerName(newProducer) && newProducer.getEpoch() > oldProducer.getEpoch()) {
+        if (newProducer.isSuccessorTo(oldProducer) && !isUserProvidedProducerName(oldProducer)
+                && !isUserProvidedProducerName(newProducer)) {
             oldProducer.close(false);
-            canOverwrite = true;
-        }
-        if (canOverwrite) {
             if (!producers.replace(newProducer.getProducerName(), oldProducer, newProducer)) {
                 // Met concurrent update, throw exception here so that client can try reconnect later.
                 throw new BrokerServiceException.NamingException("Producer with name '" + newProducer.getProducerName()

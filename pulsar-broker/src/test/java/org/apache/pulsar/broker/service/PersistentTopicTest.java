@@ -21,6 +21,8 @@ package org.apache.pulsar.broker.service;
 import static org.apache.pulsar.broker.auth.MockedPulsarServiceBaseTest.createMockBookKeeper;
 import static org.apache.pulsar.broker.auth.MockedPulsarServiceBaseTest.createMockZooKeeper;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
@@ -33,9 +35,11 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertSame;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
@@ -123,12 +127,10 @@ import org.apache.pulsar.common.protocol.schema.SchemaVersion;
 import org.apache.pulsar.common.util.Codec;
 import org.apache.pulsar.common.util.collections.ConcurrentOpenHashMap;
 import org.apache.pulsar.compaction.CompactedTopic;
+import org.apache.pulsar.compaction.CompactedTopicContext;
 import org.apache.pulsar.compaction.Compactor;
 import org.apache.pulsar.metadata.api.MetadataStore;
 import org.apache.pulsar.metadata.impl.ZKMetadataStore;
-import org.apache.pulsar.zookeeper.ZooKeeperCache;
-import org.apache.pulsar.zookeeper.ZooKeeperDataCache;
-import org.apache.pulsar.broker.admin.AdminResource;
 import org.apache.zookeeper.ZooKeeper;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
@@ -207,7 +209,9 @@ public class PersistentTopicTest extends MockedBookKeeperTestCase {
         brokerService = spy(new BrokerService(pulsar, eventLoopGroup));
         doReturn(brokerService).when(pulsar).getBrokerService();
 
-        serverCnx = spy(new ServerCnx(pulsar));
+        serverCnx = mock(ServerCnx.class, withSettings()
+                .useConstructor(pulsar)
+                .defaultAnswer(CALLS_REAL_METHODS));
         doReturn(true).when(serverCnx).isActive();
         doReturn(true).when(serverCnx).isWritable();
         doReturn(new InetSocketAddress("localhost", 1234)).when(serverCnx).clientAddress();
@@ -440,11 +444,20 @@ public class PersistentTopicTest extends MockedBookKeeperTestCase {
             // OK
         }
 
-        // 4. simple remove producer
+        // 4. Try to remove with unequal producer
+        Producer producerCopy = new Producer(topic, serverCnx, 1 /* producer id */, "prod-name",
+                role, false, null, SchemaVersion.Latest, 0, false,
+                ProducerAccessMode.Shared, Optional.empty());
+        topic.removeProducer(producerCopy);
+        // Expect producer to be in map
+        assertEquals(topic.getProducers().size(), 1);
+        assertSame(topic.getProducers().get(producer.getProducerName()), producer);
+
+        // 5. simple remove producer
         topic.removeProducer(producer);
         assertEquals(topic.getProducers().size(), 0);
 
-        // 5. duplicate remove
+        // 6. duplicate remove
         topic.removeProducer(producer); /* noop */
     }
 
@@ -575,7 +588,9 @@ public class PersistentTopicTest extends MockedBookKeeperTestCase {
         final String producerNameBase = "producer";
         final String role = "appid1";
 
-        ServerCnx cnx = spy(new ServerCnx(pulsar));
+        ServerCnx cnx = mock(ServerCnx.class, withSettings()
+                .useConstructor(pulsar)
+                .defaultAnswer(CALLS_REAL_METHODS));
         doReturn(true).when(cnx).isActive();
         doReturn(true).when(cnx).isWritable();
         doReturn(new InetSocketAddress(address, 1234)).when(cnx).clientAddress();
@@ -1013,7 +1028,9 @@ public class PersistentTopicTest extends MockedBookKeeperTestCase {
         final String consumerNameBase = "consumer";
         final String role = "appid1";
 
-        ServerCnx cnx = spy(new ServerCnx(pulsar));
+        ServerCnx cnx = mock(ServerCnx.class, withSettings()
+                .useConstructor(pulsar)
+                .defaultAnswer(CALLS_REAL_METHODS));
         doReturn(true).when(cnx).isActive();
         doReturn(true).when(cnx).isWritable();
         doReturn(new InetSocketAddress(address, 1234)).when(cnx).clientAddress();
@@ -1840,6 +1857,8 @@ public class PersistentTopicTest extends MockedBookKeeperTestCase {
     public void testCompactorSubscription() throws Exception {
         PersistentTopic topic = new PersistentTopic(successTopicName, ledgerMock, brokerService);
         CompactedTopic compactedTopic = mock(CompactedTopic.class);
+        when(compactedTopic.newCompactedLedger(any(Position.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(mock(CompactedTopicContext.class)));
         PersistentSubscription sub = new CompactorSubscription(topic, compactedTopic,
                                                                Compactor.COMPACTION_SUBSCRIPTION,
                                                                cursorMock);
@@ -1862,6 +1881,8 @@ public class PersistentTopicTest extends MockedBookKeeperTestCase {
 
         PersistentTopic topic = new PersistentTopic(successTopicName, ledgerMock, brokerService);
         CompactedTopic compactedTopic = mock(CompactedTopic.class);
+        when(compactedTopic.newCompactedLedger(any(Position.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(null));
         new CompactorSubscription(topic, compactedTopic, Compactor.COMPACTION_SUBSCRIPTION, cursorMock);
         verify(compactedTopic, Mockito.times(1)).newCompactedLedger(position, ledgerId);
     }

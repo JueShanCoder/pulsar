@@ -27,6 +27,7 @@ import static org.slf4j.bridge.SLF4JBridgeHandler.install;
 import static org.slf4j.bridge.SLF4JBridgeHandler.removeHandlersForRootLogger;
 
 import com.google.common.annotations.VisibleForTesting;
+import lombok.Getter;
 import org.apache.logging.log4j.core.util.datetime.FixedDateFormat;
 import org.apache.pulsar.broker.PulsarServerException;
 import org.apache.pulsar.broker.ServiceConfiguration;
@@ -93,6 +94,7 @@ public class ProxyServiceStarter {
 
     private ProxyConfiguration config;
 
+    @Getter
     private ProxyService proxyService;
 
     private WebServer server;
@@ -108,6 +110,7 @@ public class ProxyServiceStarter {
                 FixedDateFormat.FixedFormat.ISO8601_OFFSET_DATE_TIME_HHMM.getPattern());
             Thread.setDefaultUncaughtExceptionHandler((thread, exception) -> {
                 System.out.println(String.format("%s [%s] error Uncaught exception in thread %s: %s", dateFormat.format(new Date()), thread.getContextClassLoader(), thread.getName(), exception.getMessage()));
+                exception.printStackTrace(System.out);
             });
 
             JCommander jcommander = new JCommander();
@@ -310,6 +313,11 @@ public class ProxyServiceStarter {
     @VisibleForTesting
     public ProxyConfiguration getConfig() {
         return config;
+    }
+
+    @VisibleForTesting
+    public WebServer getServer() {
+        return server;
     }
 
     private static final Logger log = LoggerFactory.getLogger(ProxyServiceStarter.class);

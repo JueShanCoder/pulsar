@@ -127,6 +127,7 @@ import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.transaction.TransactionBufferClient;
 import org.apache.pulsar.client.impl.PulsarClientImpl;
 import org.apache.pulsar.client.impl.conf.ClientConfigurationData;
+import org.apache.pulsar.client.util.ExecutorProvider;
 import org.apache.pulsar.common.conf.InternalConfigurationData;
 import org.apache.pulsar.common.configuration.PulsarConfigurationLoader;
 import org.apache.pulsar.common.configuration.VipStatus;
@@ -258,7 +259,7 @@ public class PulsarService implements AutoCloseable, ShutdownService {
     private PulsarResources pulsarResources;
 
     private TransactionPendingAckStoreProvider transactionPendingAckStoreProvider;
-    private final ScheduledExecutorService transactionReplayExecutor;
+    private final ExecutorProvider transactionExecutorProvider;
 
     public enum State {
         Init, Started, Closing, Closed
@@ -314,11 +315,10 @@ public class PulsarService implements AutoCloseable, ShutdownService {
                 new DefaultThreadFactory("zk-cache-callback"));
 
         if (config.isTransactionCoordinatorEnabled()) {
-            this.transactionReplayExecutor = Executors.newScheduledThreadPool(
-                    config.getNumTransactionReplayThreadPoolSize(),
-                    new DefaultThreadFactory("transaction-replay"));
+            this.transactionExecutorProvider = new ExecutorProvider(this.getConfiguration()
+                    .getNumTransactionReplayThreadPoolSize(), "pulsar-transaction-executor");
         } else {
-            this.transactionReplayExecutor = null;
+            this.transactionExecutorProvider = null;
         }
 
         this.ioEventLoopGroup = EventLoopUtil.newEventLoopGroup(config.getNumIOThreads(), config.isEnableBusyWait(),
@@ -494,8 +494,8 @@ public class PulsarService implements AutoCloseable, ShutdownService {
                 configurationMetadataStore.close();
             }
 
-            if (transactionReplayExecutor != null) {
-                transactionReplayExecutor.shutdown();
+            if (transactionExecutorProvider != null) {
+                transactionExecutorProvider.shutdownNow();
             }
 
             ioEventLoopGroup.shutdownGracefully();
@@ -582,6 +582,7 @@ public class PulsarService implements AutoCloseable, ShutdownService {
         LOG.info("Starting Pulsar Broker service; version: '{}'",
                 (brokerVersion != null ? brokerVersion : "unknown"));
         LOG.info("Git Revision {}", PulsarVersion.getGitSha());
+        LOG.info("Git Branch {}", PulsarVersion.getGitBranch());
         LOG.info("Built by {} on {} at {}",
                 PulsarVersion.getBuildUser(),
                 PulsarVersion.getBuildHost(),
@@ -1245,8 +1246,8 @@ public class PulsarService implements AutoCloseable, ShutdownService {
         return cacheExecutor;
     }
 
-    public ScheduledExecutorService getTransactionReplayExecutor() {
-        return transactionReplayExecutor;
+    public ExecutorProvider getTransactionExecutorProvider() {
+        return transactionExecutorProvider;
     }
 
     public ScheduledExecutorService getLoadManagerExecutor() {
@@ -1411,7 +1412,7 @@ public class PulsarService implements AutoCloseable, ShutdownService {
      */
     protected String brokerUrl(ServiceConfiguration config) {
         AdvertisedListener internalListener = ServiceConfigurationUtils.getInternalListener(config);
-        return internalListener != null && internalListener.getBrokerServiceUrl() != null
+        return internalListener.getBrokerServiceUrl() != null
                 ? internalListener.getBrokerServiceUrl().toString() : null;
     }
 
@@ -1424,7 +1425,7 @@ public class PulsarService implements AutoCloseable, ShutdownService {
      */
     public String brokerUrlTls(ServiceConfiguration config) {
         AdvertisedListener internalListener = ServiceConfigurationUtils.getInternalListener(config);
-        return internalListener != null && internalListener.getBrokerServiceUrlTls() != null
+        return internalListener.getBrokerServiceUrlTls() != null
                 ? internalListener.getBrokerServiceUrlTls().toString() : null;
     }
 

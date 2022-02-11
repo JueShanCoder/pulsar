@@ -227,11 +227,6 @@ public class PulsarAuthorizationProvider implements AuthorizationProvider {
         return allowTheSpecifiedActionOpsAsync(namespaceName, role, authenticationData, AuthAction.sinks);
     }
 
-    @Override
-    public CompletableFuture<Boolean> allowConsumeOpsAsync(NamespaceName namespaceName, String role, AuthenticationDataSource authenticationData) {
-        return allowTheSpecifiedActionOpsAsync(namespaceName, role, authenticationData, AuthAction.consume);
-    }
-
     private CompletableFuture<Boolean> allowTheSpecifiedActionOpsAsync(NamespaceName namespaceName, String role,
                                                                        AuthenticationDataSource authenticationData,
                                                                        AuthAction authAction) {
@@ -291,6 +286,7 @@ public class PulsarAuthorizationProvider implements AuthorizationProvider {
             validatePoliciesReadOnlyAccess();
         } catch (Exception e) {
             result.completeExceptionally(e);
+            return result;
         }
 
         try {
@@ -369,20 +365,23 @@ public class PulsarAuthorizationProvider implements AuthorizationProvider {
     }
 
     private CompletableFuture<Boolean> checkAuthorization(TopicName topicName, String role, AuthAction action) {
-        return checkPermission(topicName, role, action)
-                .thenApply(isPermission -> isPermission && checkCluster(topicName));
+        return checkPermission(topicName, role, action).
+                thenApply(isPermission -> isPermission).
+                thenCompose(permission -> permission ? checkCluster(topicName) :
+                    CompletableFuture.completedFuture(false));
     }
 
-    private boolean checkCluster(TopicName topicName) {
+    private CompletableFuture<Boolean> checkCluster(TopicName topicName) {
         if (topicName.isGlobal() || conf.getClusterName().equals(topicName.getCluster())) {
-            return true;
-        } else {
-            if (log.isDebugEnabled()) {
-                log.debug("Topic [{}] does not belong to local cluster [{}]", topicName.toString(),
-                        conf.getClusterName());
-            }
-            return false;
+            return CompletableFuture.completedFuture(true);
         }
+        if (log.isDebugEnabled()) {
+            log.debug("Topic [{}] does not belong to local cluster [{}]", topicName.toString(), conf.getClusterName());
+        }
+        return pulsarResources.getClusterResources().listAsync()
+                .thenApply(clusters -> {
+                    return clusters.contains(topicName.getCluster());
+                });
     }
 
     public CompletableFuture<Boolean> checkPermission(TopicName topicName, String role, AuthAction action) {
@@ -531,7 +530,9 @@ public class PulsarAuthorizationProvider implements AuthorizationProvider {
                 isAuthorizedFuture = allowTheSpecifiedActionOpsAsync(namespaceName, role, authData, AuthAction.packages);
                 break;
             case GET_TOPICS:
-                isAuthorizedFuture = allowConsumeOpsAsync(namespaceName, role, authData);
+            case UNSUBSCRIBE:
+            case CLEAR_BACKLOG:
+                isAuthorizedFuture = allowTheSpecifiedActionOpsAsync(namespaceName, role, authData, AuthAction.consume);
                 break;
             default:
                 isAuthorizedFuture = CompletableFuture.completedFuture(false);
@@ -581,6 +582,7 @@ public class PulsarAuthorizationProvider implements AuthorizationProvider {
             case EXPIRE_MESSAGES:
             case PEEK_MESSAGES:
             case RESET_CURSOR:
+            case GET_BACKLOG_SIZE:
             case SET_REPLICATED_SUBSCRIPTION_STATUS:
                 isAuthorizedFuture = canConsumeAsync(topicName, role, authData, authData.getSubscription());
                 break;

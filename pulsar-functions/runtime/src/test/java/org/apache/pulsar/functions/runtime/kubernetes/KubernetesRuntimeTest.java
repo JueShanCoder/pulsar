@@ -358,7 +358,8 @@ public class KubernetesRuntimeTest {
     	testResources(1.0 / 1.5, 1000, 1.3, 1.0);
     }
 
-    public void testResources(double userCpuRequest, long userMemoryRequest, double cpuOverCommitRatio, double memoryOverCommitRatio) throws Exception {
+    private void testResources(double userCpuRequest, long userMemoryRequest, double cpuOverCommitRatio,
+            double memoryOverCommitRatio) throws Exception {
 
         Function.Resources resources = Function.Resources.newBuilder()
                 .setRam(userMemoryRequest).setCpu(userCpuRequest).setDisk(10000L).build();
@@ -875,7 +876,7 @@ public class KubernetesRuntimeTest {
         assertEquals(goInstanceConfig.get("autoAck"), false);
         assertEquals(goInstanceConfig.get("regexPatternSubscription"), false);
         assertEquals(goInstanceConfig.get("pulsarServiceURL"), pulsarServiceUrl);
-        assertEquals(goInstanceConfig.get("runtime"), 0);
+        assertEquals(goInstanceConfig.get("runtime"), 3);
         assertEquals(goInstanceConfig.get("cpu"), 1.0);
         assertEquals(goInstanceConfig.get("funcVersion"), "1.0");
         assertEquals(goInstanceConfig.get("disk"), 10000);

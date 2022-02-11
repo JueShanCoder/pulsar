@@ -37,6 +37,8 @@ import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminBuilder;
 import org.apache.pulsar.client.admin.internal.PulsarAdminImpl;
 
+import static org.apache.commons.lang3.StringUtils.isBlank;
+
 public class PulsarAdminTool {
 
     private static boolean allowSystemExit = true;
@@ -156,6 +158,7 @@ public class PulsarAdminTool {
         commandMap.put("sink", CmdSinks.class);
 
         commandMap.put("packages", CmdPackages.class);
+        commandMap.put("transactions", CmdTransactions.class);
     }
 
     private static class PulsarAdminSupplier implements Supplier<PulsarAdmin> {
@@ -249,6 +252,11 @@ public class PulsarAdminTool {
             return false;
         }
 
+        if (isBlank(serviceUrl)) {
+            jcommander.usage();
+            return false;
+        }
+
         if (version) {
             System.out.println("Current version of pulsar admin client is: " + PulsarVersion.getVersion());
             return true;
@@ -285,11 +293,12 @@ public class PulsarAdminTool {
 
     public static void main(String[] args) throws Exception {
         lastExitCode = 0;
-        String configFile = null;
-        if (args.length > 0) {
-            configFile = args[0];
-            args = Arrays.copyOfRange(args, 1, args.length);
+        if (args.length == 0) {
+            System.out.println("Usage: pulsar-admin CONF_FILE_PATH [options] [command] [command options]");
+            exit(0);
+            return;
         }
+        String configFile = args[0];
         Properties properties = new Properties();
 
         if (configFile != null) {
@@ -301,6 +310,7 @@ public class PulsarAdminTool {
         PulsarAdminTool tool = new PulsarAdminTool(properties);
 
         int cmdPos;
+        args = Arrays.copyOfRange(args, 1, args.length);
         for (cmdPos = 0; cmdPos < args.length; cmdPos++) {
             if (tool.commandMap.containsKey(args[cmdPos])) {
                 break;
@@ -308,7 +318,7 @@ public class PulsarAdminTool {
         }
 
         ++cmdPos;
-        boolean isLocalRun = cmdPos < args.length && "localrun".equals(args[cmdPos].toLowerCase());
+        boolean isLocalRun = cmdPos < args.length && "localrun".equalsIgnoreCase(args[cmdPos]);
 
         Function<PulsarAdminBuilder, ? extends PulsarAdmin> adminFactory;
         if (isLocalRun) {

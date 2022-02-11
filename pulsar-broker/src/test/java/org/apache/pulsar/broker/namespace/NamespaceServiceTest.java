@@ -66,7 +66,6 @@ import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.policies.data.BundlesData;
 import org.apache.pulsar.common.policies.data.LocalPolicies;
 import org.apache.pulsar.common.policies.data.Policies;
-import org.apache.pulsar.common.policies.data.impl.BundlesDataImpl.BundlesDataImplBuilder;
 import org.apache.pulsar.common.util.ObjectMapperFactory;
 import org.apache.pulsar.common.util.collections.ConcurrentOpenHashMap;
 import org.apache.pulsar.metadata.api.GetResult;
@@ -74,6 +73,7 @@ import org.apache.pulsar.metadata.api.extended.CreateOption;
 import org.apache.pulsar.policies.data.loadbalancer.AdvertisedListener;
 import org.apache.pulsar.policies.data.loadbalancer.LoadReport;
 import org.apache.pulsar.policies.data.loadbalancer.LocalBrokerData;
+import org.awaitility.Awaitility;
 import org.mockito.stubbing.Answer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -492,6 +492,48 @@ public class NamespaceServiceTest extends BrokerTestBase {
         }
     }
 
+
+    @Test
+    public void testSplitBundleAndRemoveOldBundleFromOwnerShipCache() throws Exception {
+        OwnershipCache ownershipCache = spy(pulsar.getNamespaceService().getOwnershipCache());
+        doReturn(CompletableFuture.completedFuture(null)).when(ownershipCache).disableOwnership(any(NamespaceBundle.class));
+
+        Field ownership = NamespaceService.class.getDeclaredField("ownershipCache");
+        ownership.setAccessible(true);
+        ownership.set(pulsar.getNamespaceService(), ownershipCache);
+
+        NamespaceService namespaceService = pulsar.getNamespaceService();
+        NamespaceName nsname = NamespaceName.get("pulsar/global/ns1");
+        TopicName topicName = TopicName.get("persistent://pulsar/global/ns1/topic-1");
+        NamespaceBundles bundles = namespaceService.getNamespaceBundleFactory().getBundles(nsname);
+
+        NamespaceBundle splitBundle1 = bundles.findBundle(topicName);
+        ownershipCache.tryAcquiringOwnership(splitBundle1);
+        CompletableFuture<Void> result1 = namespaceService.splitAndOwnBundle(splitBundle1, false, NamespaceBundleSplitAlgorithm.RANGE_EQUALLY_DIVIDE_ALGO);
+        try {
+            result1.get();
+        } catch (Exception e) {
+            fail("split bundle failed", e);
+        }
+        Awaitility.await().untilAsserted(()
+                -> assertNull(namespaceService.getOwnershipCache().getOwnedBundles().get(splitBundle1)));
+
+        //unload split
+        bundles = namespaceService.getNamespaceBundleFactory().getBundles(nsname);
+        assertNotNull(bundles);
+        NamespaceBundle splitBundle2 = bundles.findBundle(topicName);
+        CompletableFuture<Void> result2 = namespaceService.splitAndOwnBundle(splitBundle2, true, NamespaceBundleSplitAlgorithm.RANGE_EQUALLY_DIVIDE_ALGO);
+        try {
+            result2.get();
+        } catch (Exception e) {
+            // make sure: NPE does not occur
+            fail("split bundle failed", e);
+        }
+        Awaitility.await().untilAsserted(()
+                -> assertNull(namespaceService.getOwnershipCache().getOwnedBundles().get(splitBundle2)));
+    }
+
+
     @Test
     public void testSplitLargestBundle() throws Exception {
         String namespace = "prop/test/ns-abc2";
@@ -537,6 +579,14 @@ public class NamespaceServiceTest extends BrokerTestBase {
         for (NamespaceBundle bundle : namespaceService.getNamespaceBundleFactory().getBundles(nsname).getBundles()) {
             assertNotEquals(bundle.getBundleRange(), maxBundle);
         }
+    }
+
+    @Test
+    public void testHeartbeatNamespaceMatch() throws Exception {
+        NamespaceName namespaceName = NamespaceService.getHeartbeatNamespace(pulsar.getAdvertisedAddress(), conf);
+        NamespaceBundle namespaceBundle = pulsar.getNamespaceService().getNamespaceBundleFactory().getFullBundle(namespaceName);
+        assertTrue(NamespaceService.isSystemServiceNamespace(
+                        NamespaceBundle.getBundleNamespace(namespaceBundle.toString())));
     }
 
     @SuppressWarnings("unchecked")

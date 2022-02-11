@@ -79,7 +79,8 @@ public class MessageDeduplication {
         Failed,
     }
 
-    enum MessageDupStatus {
+    @VisibleForTesting
+    public enum MessageDupStatus {
         // whether a message is a definitely a duplicate or not cannot be determined at this time
         Unknown,
         // message is definitely NOT a duplicate
@@ -138,6 +139,7 @@ public class MessageDeduplication {
     private CompletableFuture<Void> recoverSequenceIdsMap() {
         // Load the sequence ids from the snapshot in the cursor properties
         managedCursor.getProperties().forEach((k, v) -> {
+            producerRemoved(k);
             highestSequencedPushed.put(k, v);
             highestSequencedPersisted.put(k, v);
         });
@@ -168,6 +170,7 @@ public class MessageDeduplication {
                     long sequenceId = Math.max(md.getHighestSequenceId(), md.getSequenceId());
                     highestSequencedPushed.put(producerName, sequenceId);
                     highestSequencedPersisted.put(producerName, sequenceId);
+                    producerRemoved(producerName);
 
                     entry.release();
                 }
@@ -310,7 +313,7 @@ public class MessageDeduplication {
      * @return true if the message should be published or false if it was recognized as a duplicate
      */
     public MessageDupStatus isDuplicate(PublishContext publishContext, ByteBuf headersAndPayload) {
-        if (!isEnabled()) {
+        if (!isEnabled() || publishContext.isMarkerMessage()) {
             return MessageDupStatus.NotDup;
         }
 
@@ -363,7 +366,7 @@ public class MessageDeduplication {
      * Call this method whenever a message is persisted to get the chance to trigger a snapshot.
      */
     public void recordMessagePersisted(PublishContext publishContext, PositionImpl position) {
-        if (!isEnabled()) {
+        if (!isEnabled() || publishContext.isMarkerMessage()) {
             return;
         }
 

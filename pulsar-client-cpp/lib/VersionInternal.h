@@ -16,16 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
+#ifndef LIB_VERSION_INTERNAL_H_
+#define LIB_VERSION_INTERNAL_H_
 
-/**
- * Exception is thrown when opening a reader on a transaction that is not sealed yet.
- */
-public class TransactionNotSealedException extends TransactionBufferException {
+#ifndef _PULSAR_VERSION_INTERNAL_
+#define _PULSAR_VERSION_INTERNAL_ "unknown"
+#endif
 
-    private static final long serialVersionUID = 0L;
-
-    public TransactionNotSealedException(String message) {
-        super(message);
-    }
-}
+#endif /* LIB_VERSION_INTERNAL_H_ */

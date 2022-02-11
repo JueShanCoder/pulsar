@@ -83,7 +83,8 @@ public abstract class AbstractReplicator {
                 .enableBatching(false)
                 .sendTimeout(0, TimeUnit.SECONDS) //
                 .maxPendingMessages(producerQueueSize) //
-                .producerName(getReplicatorName(replicatorPrefix, localCluster));
+                .producerName(String.format("%s%s%s", getReplicatorName(replicatorPrefix, localCluster),
+                        REPL_PRODUCER_NAME_DELIMITER, remoteCluster));
         STATE_UPDATER.set(this, State.Stopped);
     }
 
@@ -181,8 +182,10 @@ public abstract class AbstractReplicator {
         if (failIfHasBacklog && getNumberOfEntriesInBacklog() > 0) {
             CompletableFuture<Void> disconnectFuture = new CompletableFuture<>();
             disconnectFuture.completeExceptionally(new TopicBusyException("Cannot close a replicator with backlog"));
-            log.debug("[{}][{} -> {}] Replicator disconnect failed since topic has backlog", topicName, localCluster,
-                    remoteCluster);
+            if (log.isDebugEnabled()) {
+                log.debug("[{}][{} -> {}] Replicator disconnect failed since topic has backlog", topicName, localCluster
+                        , remoteCluster);
+            }
             return disconnectFuture;
         }
 

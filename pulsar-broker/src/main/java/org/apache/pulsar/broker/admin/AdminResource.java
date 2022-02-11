@@ -35,8 +35,10 @@ import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.bookkeeper.client.BookKeeper;
+import org.apache.bookkeeper.mledger.ManagedLedgerException;
 import org.apache.pulsar.broker.PulsarService;
 import org.apache.pulsar.broker.ServiceConfiguration;
+import org.apache.pulsar.broker.service.BrokerServiceException;
 import org.apache.pulsar.broker.systopic.SystemTopicClient;
 import org.apache.pulsar.broker.web.PulsarWebResource;
 import org.apache.pulsar.broker.web.RestException;
@@ -54,6 +56,7 @@ import org.apache.pulsar.common.policies.data.NamespaceOperation;
 import org.apache.pulsar.common.policies.data.PersistencePolicies;
 import org.apache.pulsar.common.policies.data.Policies;
 import org.apache.pulsar.common.policies.data.RetentionPolicies;
+import org.apache.pulsar.common.policies.data.SchemaCompatibilityStrategy;
 import org.apache.pulsar.common.policies.data.SubscribeRate;
 import org.apache.pulsar.common.policies.data.TopicOperation;
 import org.apache.pulsar.common.policies.data.TopicPolicies;
@@ -61,6 +64,7 @@ import org.apache.pulsar.common.policies.data.impl.DispatchRateImpl;
 import org.apache.pulsar.common.util.Codec;
 import org.apache.pulsar.common.util.FutureUtil;
 import org.apache.pulsar.common.util.ObjectMapperFactory;
+import org.apache.pulsar.metadata.api.MetadataStoreException;
 import org.apache.pulsar.metadata.api.MetadataStoreException.AlreadyExistsException;
 import org.apache.pulsar.metadata.api.MetadataStoreException.BadVersionException;
 
@@ -755,10 +759,26 @@ public abstract class AdminResource extends PulsarWebResource {
 
     protected void resumeAsyncResponseExceptionally(AsyncResponse asyncResponse, Throwable throwable) {
         if (throwable instanceof WebApplicationException) {
-            asyncResponse.resume((WebApplicationException) throwable);
+            asyncResponse.resume(throwable);
+        } else if (throwable instanceof BrokerServiceException.NotAllowedException) {
+            asyncResponse.resume(new RestException(Status.CONFLICT, throwable));
         } else {
             asyncResponse.resume(new RestException(throwable));
         }
+    }
+
+    protected CompletableFuture<SchemaCompatibilityStrategy> getSchemaCompatibilityStrategyAsync() {
+        return getNamespacePoliciesAsync(namespaceName).thenApply(policies -> {
+            SchemaCompatibilityStrategy schemaCompatibilityStrategy = policies.schema_compatibility_strategy;
+            if (SchemaCompatibilityStrategy.isUndefined(schemaCompatibilityStrategy)) {
+                schemaCompatibilityStrategy = SchemaCompatibilityStrategy.fromAutoUpdatePolicy(
+                        policies.schema_auto_update_compatibility_strategy);
+                if (SchemaCompatibilityStrategy.isUndefined(schemaCompatibilityStrategy)) {
+                    schemaCompatibilityStrategy = pulsar().getConfig().getSchemaCompatibilityStrategy();
+                }
+            }
+            return schemaCompatibilityStrategy;
+        });
     }
 
     @CanIgnoreReturnValue
@@ -770,6 +790,12 @@ public abstract class AdminResource extends PulsarWebResource {
         if (o == null) {
             throw new RestException(Status.BAD_REQUEST, errorMessage);
         }
+    }
+
+    protected boolean isManagedLedgerNotFoundException(Exception e) {
+        Throwable cause = e.getCause();
+        return cause instanceof ManagedLedgerException.MetadataNotFoundException
+                || cause instanceof MetadataStoreException.NotFoundException;
     }
 
     protected void checkArgument(boolean b, String errorMessage) {

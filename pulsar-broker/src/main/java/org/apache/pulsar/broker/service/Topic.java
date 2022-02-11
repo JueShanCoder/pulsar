@@ -258,6 +258,8 @@ public interface Topic {
         return false;
     }
 
+    boolean isPersistent();
+
     /* ------ Transaction related ------ */
 
     /**
@@ -286,4 +288,9 @@ public interface Topic {
      */
     CompletableFuture<Void> truncate();
 
+    /**
+     * Get BrokerService.
+     * @return
+     */
+    BrokerService getBrokerService();
 }

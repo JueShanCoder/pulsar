@@ -20,12 +20,12 @@ package org.apache.pulsar.client.impl;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.apache.pulsar.common.protocol.Commands.hasChecksum;
+import static org.apache.pulsar.common.util.Runnables.catchingAndLoggingThrowables;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.Iterables;
 import com.scurrilous.circe.checksum.Crc32cIntChecksum;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.util.Recycler;
 import io.netty.util.Recycler.Handle;
@@ -427,8 +427,7 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
             if (message == null) {
                 pendingReceives.add(result);
                 cancellationHandler.setCancelAction(() -> pendingReceives.remove(result));
-            }
-            if (message != null) {
+            } else {
                 messageProcessed(message);
                 result.complete(beforeConsume(message));
             }
@@ -590,9 +589,9 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
                 propertiesMap.put(RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES, String.valueOf(reconsumetimes));
                 propertiesMap.put(RetryMessageUtil.SYSTEM_PROPERTY_DELAY_TIME, String.valueOf(unit.toMillis(delayTime)));
 
+                MessageId finalMessageId = messageId;
                 if (reconsumetimes > this.deadLetterPolicy.getMaxRedeliverCount() && StringUtils.isNotBlank(deadLetterPolicy.getDeadLetterTopic())) {
                     initDeadLetterProducerIfNeeded();
-                    MessageId finalMessageId = messageId;
                     deadLetterProducer.thenAccept(dlqProducer -> {
                         TypedMessageBuilder<byte[]> typedMessageBuilderNew =
                                 dlqProducer.newMessage(Schema.AUTO_PRODUCE_BYTES(retryMessage.getReaderSchema().get()))
@@ -624,8 +623,12 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
                     if (message.hasKey()) {
                         typedMessageBuilderNew.key(message.getKey());
                     }
-                    typedMessageBuilderNew.send();
-                    return doAcknowledge(messageId, ackType, properties, null);
+                    typedMessageBuilderNew.sendAsync()
+                            .thenAccept(__ -> doAcknowledge(finalMessageId, ackType, properties, null).thenAccept(v -> result.complete(null)))
+                            .exceptionally(ex -> {
+                                result.completeExceptionally(ex);
+                                return null;
+                            });
                 }
             } catch (Exception e) {
                 log.error("Send to retry letter topic exception with topic: {}, messageId: {}", retryLetterProducer.getTopic(), messageId, e);
@@ -649,8 +652,8 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
         if (message.getProperties() != null) {
             propertiesMap.putAll(message.getProperties());
         }
-        propertiesMap.put(RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC, originTopicNameStr);
-        propertiesMap.put(RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID, originMessageIdStr);
+        propertiesMap.putIfAbsent(RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC, originTopicNameStr);
+        propertiesMap.putIfAbsent(RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID, originMessageIdStr);
         return propertiesMap;
     }
 
@@ -1123,8 +1126,7 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
             increaseAvailablePermits(cnx(), skippedMessages.get());
         }
 
-        internalPinnedExecutor.execute(()
-                -> tryTriggerListener());
+        tryTriggerListener();
     }
 
     void messageReceived(MessageIdData messageId, int redeliveryCount, List<Long> ackSet, ByteBuf headersAndPayload, ClientCnx cnx) {
@@ -1229,8 +1231,7 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
 
             uncompressedPayload.release();
         }
-        internalPinnedExecutor.execute(()
-                -> tryTriggerListener());
+        tryTriggerListener();
 
     }
 
@@ -1240,24 +1241,20 @@ public class ConsumerImpl<T> extends ConsumerBase<T> implements ConnectionHandle
         }
     }
 
-    private boolean isTxnMessage(MessageMetadata messageMetadata) {
-        return messageMetadata.hasTxnidMostBits() && messageMetadata.hasTxnidLeastBits();
-    }
-
     private ByteBuf processMessageChunk(ByteBuf compressedPayload, MessageMetadata msgMetadata, MessageIdImpl msgId,
             MessageIdData messageId, ClientCnx cnx) {
 
         // Lazy task scheduling to expire incomplete chunk message
         if (!expireChunkMessageTaskScheduled && expireTimeOfIncompleteChunkedMessageMillis > 0) {
-            internalPinnedExecutor.scheduleAtFixedRate(() -> {
-                        removeExpireIncompleteChunkedMessages();
-                    }, expireTimeOfIncompleteChunkedMessageMillis, expireTimeOfIncompleteChunkedMessageMillis,
-                    TimeUnit.MILLISECONDS);
+            internalPinnedExecutor
+                    .scheduleAtFixedRate(catchingAndLoggingThrowables(this::removeExpireIncompleteChunkedMessages),
+                            expireTimeOfIncompleteChunkedMessageMillis, expireTimeOfIncompleteChunkedMessageMillis,
+                            TimeUnit.MILLISECONDS);
             expireChunkMessageTaskScheduled = true;
         }
 
         if (msgMetadata.getChunkId() == 0) {
-            ByteBuf chunkedMsgBuffer = Unpooled.directBuffer(msgMetadata.getTotalChunkMsgSize(),
+            ByteBuf chunkedMsgBuffer = PulsarByteBufAllocator.DEFAULT.buffer(msgMetadata.getTotalChunkMsgSize(),
                     msgMetadata.getTotalChunkMsgSize());
             int totalChunks = msgMetadata.getNumChunksFromMsg();
             chunkedMessagesMap.computeIfAbsent(msgMetadata.getUuid(),

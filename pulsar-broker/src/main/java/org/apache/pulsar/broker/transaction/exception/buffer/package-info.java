@@ -16,24 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
-
 /**
- * The base exception class for the errors thrown from Transaction Buffer.
+ * Exceptions thrown when encountering errors in transaction buffer.
  */
-public abstract class TransactionBufferException extends Exception {
-
-    private static final long serialVersionUID = 0L;
-
-    public TransactionBufferException(String message) {
-        super(message);
-    }
-
-    public TransactionBufferException(String message, Throwable cause) {
-        super(message, cause);
-    }
-
-    public TransactionBufferException(Throwable cause) {
-        super(cause);
-    }
-}
+package org.apache.pulsar.broker.transaction.exception.buffer;

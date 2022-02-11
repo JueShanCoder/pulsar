@@ -16,17 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.pendingack.exceptions;
+#include <pulsar/Version.h>
+#include <gtest/gtest.h>
 
-import org.apache.pulsar.broker.transaction.buffer.exceptions.TransactionBufferException;
-
-/**
- * Transaction pending ack store provider exception.
- */
-public class TransactionPendingAckStoreProviderException extends TransactionBufferException {
-
-    public TransactionPendingAckStoreProviderException(String message) {
-        super(message);
-    }
-
+TEST(VersionTest, testMacro) {
+#ifdef PULSAR_VERSION
+    ASSERT_GE(PULSAR_VERSION, 2000000);
+    ASSERT_LE(PULSAR_VERSION, 999999999);
+#else
+    FAIL();
+#endif
 }

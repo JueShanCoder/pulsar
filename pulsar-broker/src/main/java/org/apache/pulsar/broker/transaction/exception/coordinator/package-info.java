@@ -16,19 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
-
-import org.apache.pulsar.client.api.transaction.TxnID;
-import org.apache.pulsar.common.api.proto.TxnAction;
-
 /**
- * Exceptions are thrown when txnAction is unsupported.
+ * Exceptions thrown when encountering errors in transaction buffer.
  */
-public class UnsupportedTxnActionException extends TransactionBufferException {
-
-    private static final long serialVersionUID = 0L;
-
-    public UnsupportedTxnActionException(TxnID txnId, int txnAction) {
-        super("Transaction `" + txnId + "` receive unsupported txnAction " + TxnAction.valueOf(txnAction));
-    }
-}
+package org.apache.pulsar.broker.transaction.exception.coordinator;

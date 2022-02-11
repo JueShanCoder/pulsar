@@ -21,7 +21,6 @@ package org.apache.pulsar.broker.service.persistent;
 import static org.apache.pulsar.broker.auth.MockedPulsarServiceBaseTest.createMockBookKeeper;
 import static org.apache.pulsar.broker.auth.MockedPulsarServiceBaseTest.createMockZooKeeper;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
@@ -57,7 +56,6 @@ import org.apache.pulsar.broker.ServiceConfiguration;
 import org.apache.pulsar.broker.resources.NamespaceResources;
 import org.apache.pulsar.broker.resources.PulsarResources;
 import org.apache.pulsar.broker.service.BrokerService;
-import org.apache.pulsar.broker.service.BrokerServiceException;
 import org.apache.pulsar.broker.service.Consumer;
 import org.apache.pulsar.broker.transaction.buffer.impl.InMemTransactionBufferProvider;
 import org.apache.pulsar.broker.transaction.pendingack.PendingAckStore;
@@ -73,20 +71,14 @@ import org.apache.pulsar.compaction.Compactor;
 import org.apache.pulsar.metadata.api.MetadataStore;
 import org.apache.pulsar.metadata.impl.ZKMetadataStore;
 import org.apache.pulsar.transaction.common.exception.TransactionConflictException;
-import org.apache.pulsar.zookeeper.ZooKeeperCache;
-import org.apache.pulsar.zookeeper.ZooKeeperDataCache;
 import org.apache.zookeeper.ZooKeeper;
 import org.awaitility.Awaitility;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-@PrepareForTest({ ZooKeeperDataCache.class, BrokerService.class })
-@PowerMockIgnore({"org.apache.logging.log4j.*"})
 @Test(groups = "broker")
 public class PersistentSubscriptionTest {
 
@@ -271,7 +263,7 @@ public class PersistentSubscriptionTest {
     }
 
     @Test
-    public void testCanAcknowledgeAndAbortForTransaction() throws BrokerServiceException, InterruptedException {
+    public void testCanAcknowledgeAndAbortForTransaction() throws Exception {
         List<MutablePair<PositionImpl, Integer>> positionsPair = new ArrayList<>();
         positionsPair.add(new MutablePair<>(new PositionImpl(2, 1), 0));
         positionsPair.add(new MutablePair<>(new PositionImpl(2, 3), 0));
@@ -300,7 +292,7 @@ public class PersistentSubscriptionTest {
         positions.add(new PositionImpl(1, 100));
 
         // Cumulative ack for txn1
-        persistentSubscription.transactionCumulativeAcknowledge(txnID1, positions);
+        persistentSubscription.transactionCumulativeAcknowledge(txnID1, positions).get();
 
         positions.clear();
         positions.add(new PositionImpl(2, 1));

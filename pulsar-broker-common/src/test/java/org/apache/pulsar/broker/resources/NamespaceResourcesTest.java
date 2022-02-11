@@ -16,7 +16,19 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-/**
- * Exceptions thrown when encountering errors in transaction buffer.
- */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
+
+package org.apache.pulsar.broker.resources;
+
+import org.junit.Assert;
+import org.testng.annotations.Test;
+
+
+public class NamespaceResourcesTest {
+    @Test
+    public void test_pathIsFromNamespace() {
+        Assert.assertFalse(NamespaceResources.pathIsFromNamespace("/admin/clusters"));
+        Assert.assertFalse(NamespaceResources.pathIsFromNamespace("/admin/policies"));
+        Assert.assertFalse(NamespaceResources.pathIsFromNamespace("/admin/policies/my-tenant"));
+        Assert.assertTrue(NamespaceResources.pathIsFromNamespace("/admin/policies/my-tenant/my-ns"));
+    }
+}

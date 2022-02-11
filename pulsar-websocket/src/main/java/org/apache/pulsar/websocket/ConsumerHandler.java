@@ -107,7 +107,7 @@ public class ConsumerHandler extends AbstractWebSocketHandler {
         this.numMsgsDelivered = new LongAdder();
         this.numBytesDelivered = new LongAdder();
         this.numMsgsAcked = new LongAdder();
-        this.pullMode = Boolean.valueOf(queryParams.get("pullMode"));
+        this.pullMode = Boolean.parseBoolean(queryParams.get("pullMode"));
 
         try {
             // checkAuth() and getConsumerConfiguration() should be called after assigning a value to this.subscription
@@ -160,6 +160,7 @@ public class ConsumerHandler extends AbstractWebSocketHandler {
             dm.properties = msg.getProperties();
             dm.publishTime = DateFormatter.format(msg.getPublishTime());
             dm.redeliveryCount = msg.getRedeliveryCount();
+            dm.encryptionContext = msg.getEncryptionCtx().orElse(null);
             if (msg.getEventTime() != 0) {
                 dm.eventTime = DateFormatter.format(msg.getEventTime());
             }

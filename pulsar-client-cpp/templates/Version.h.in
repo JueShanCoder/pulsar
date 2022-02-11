@@ -16,15 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
 
 /**
- * Transaction buffer provider exception.
+ * @PVM_COMMENT@
  */
-public class TransactionBufferProviderException extends TransactionBufferException {
+#ifndef PULSAR_VERSION_H_
+#define PULSAR_VERSION_H_
 
-    public TransactionBufferProviderException(String message) {
-        super(message);
-    }
+#define PULSAR_VERSION @PVM@
 
-}
+#endif /* PULSAR_VERSION_H_ */

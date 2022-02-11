@@ -16,16 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pulsar.broker.transaction.buffer.exceptions;
 
-/**
- * Exception thrown when reaching end of a transaction.
- */
-public class EndOfTransactionException extends TransactionBufferException {
+package org.apache.pulsar.common.util;
 
-    private static final long serialVersionUID = 0L;
+import org.testng.annotations.Test;
 
-    public EndOfTransactionException(String message) {
-        super(message);
+public class RunnablesTest {
+
+    @Test
+    public void shouldCatchAndLogException() {
+        Runnables.catchingAndLoggingThrowables(() -> {
+            throw new RuntimeException();
+        }).run();
     }
 }

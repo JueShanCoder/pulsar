@@ -23,13 +23,16 @@ import java.util.concurrent.CompletableFuture;
 import org.apache.bookkeeper.mledger.ManagedLedger;
 import org.apache.pulsar.broker.PulsarServerException;
 import org.apache.pulsar.broker.service.BrokerService;
-import org.apache.pulsar.broker.service.BrokerServiceException;
 
 public class SystemTopic extends PersistentTopic {
 
-    public SystemTopic(String topic, ManagedLedger ledger, BrokerService brokerService)
-            throws BrokerServiceException.NamingException, PulsarServerException {
+    public SystemTopic(String topic, ManagedLedger ledger, BrokerService brokerService) throws PulsarServerException {
         super(topic, ledger, brokerService);
+    }
+
+    @Override
+    public boolean isDeleteWhileInactive() {
+        return false;
     }
 
     @Override

@@ -331,7 +331,7 @@ public class BrokerService implements Closeable {
             log.info("Enabling per-broker unack-message limit {} and dispatcher-limit {} on blocked-broker",
                     maxUnackedMessages, maxUnackedMsgsPerDispatcher);
             // block misbehaving dispatcher by checking periodically
-            pulsar.getExecutor().scheduleAtFixedRate(() -> checkUnAckMessageDispatching(),
+            pulsar.getExecutor().scheduleAtFixedRate(safeRun(this::checkUnAckMessageDispatching),
                     600, 30, TimeUnit.SECONDS);
         } else {
             this.maxUnackedMessages = 0;
@@ -830,15 +830,17 @@ public class BrokerService implements Closeable {
             // unload all namespace-bundles gracefully
             long closeTopicsStartTime = System.nanoTime();
             Set<NamespaceBundle> serviceUnits = pulsar.getNamespaceService().getOwnedServiceUnits();
-            serviceUnits.forEach(su -> {
-                if (su instanceof NamespaceBundle) {
-                    try {
-                        pulsar.getNamespaceService().unloadNamespaceBundle(su, 1, TimeUnit.MINUTES).get();
-                    } catch (Exception e) {
-                        log.warn("Failed to unload namespace bundle {}", su, e);
+            if (serviceUnits != null) {
+                serviceUnits.forEach(su -> {
+                    if (su instanceof NamespaceBundle) {
+                        try {
+                            pulsar.getNamespaceService().unloadNamespaceBundle(su, 1, TimeUnit.MINUTES).get();
+                        } catch (Exception e) {
+                            log.warn("Failed to unload namespace bundle {}", su, e);
+                        }
                     }
-                }
-            });
+                });
+            }
 
             double closeTopicsTimeSeconds = TimeUnit.NANOSECONDS.toMillis((System.nanoTime() - closeTopicsStartTime))
                     / 1000.0;
@@ -971,6 +973,9 @@ public class BrokerService implements Closeable {
             }
         }
 
+        if (log.isDebugEnabled()) {
+            log.debug("Topic {} is not loaded, try to delete from metadata", topic);
+        }
         // Topic is not loaded, though we still might be able to delete from metadata
         TopicName tn = TopicName.get(topic);
         if (!tn.isPersistent()) {
@@ -979,19 +984,74 @@ public class BrokerService implements Closeable {
         }
 
         CompletableFuture<Void> future = new CompletableFuture<>();
-        managedLedgerFactory.asyncDelete(tn.getPersistenceNamingEncoding(), new DeleteLedgerCallback() {
-            @Override
-            public void deleteLedgerComplete(Object ctx) {
-                future.complete(null);
-            }
 
-            @Override
-            public void deleteLedgerFailed(ManagedLedgerException exception, Object ctx) {
-                future.completeExceptionally(exception);
+        CompletableFuture<Void> deleteTopicAuthenticationFuture = new CompletableFuture<>();
+        deleteTopicAuthenticationWithRetry(topic, deleteTopicAuthenticationFuture, 5);
+        deleteTopicAuthenticationFuture.whenComplete((v, ex) -> {
+            if (ex != null) {
+                future.completeExceptionally(ex);
+                return;
             }
-        }, null);
+            managedLedgerFactory.asyncDelete(tn.getPersistenceNamingEncoding(), new DeleteLedgerCallback() {
+                @Override
+                public void deleteLedgerComplete(Object ctx) {
+                    future.complete(null);
+                }
+
+                @Override
+                public void deleteLedgerFailed(ManagedLedgerException exception, Object ctx) {
+                    future.completeExceptionally(exception);
+                }
+            }, null);
+        });
+
 
         return future;
+    }
+
+    public void deleteTopicAuthenticationWithRetry(String topic, CompletableFuture<Void> future, int count) {
+        if (count == 0) {
+            log.error("The number of retries has exhausted for topic {}", topic);
+            future.completeExceptionally(new MetadataStoreException("The number of retries has exhausted"));
+            return;
+        }
+        NamespaceName namespaceName = TopicName.get(topic).getNamespaceObject();
+        // Check whether there are auth policies for the topic
+        pulsar.getPulsarResources().getNamespaceResources().getPoliciesAsync(namespaceName).thenAccept(optPolicies -> {
+            if (!optPolicies.isPresent() || !optPolicies.get().auth_policies.getTopicAuthentication()
+                    .containsKey(topic)) {
+                // if there is no auth policy for the topic, just complete and return
+                if (log.isDebugEnabled()) {
+                    log.debug("Authentication policies not found for topic {}", topic);
+                }
+                future.complete(null);
+                return;
+            }
+            pulsar.getPulsarResources().getNamespaceResources()
+                    .setPoliciesAsync(TopicName.get(topic).getNamespaceObject(), p -> {
+                        p.auth_policies.getTopicAuthentication().remove(topic);
+                        return p;
+                    }).thenAccept(v -> {
+                        log.info("Successfully delete authentication policies for topic {}", topic);
+                        future.complete(null);
+                    }).exceptionally(ex1 -> {
+                        if (ex1.getCause() instanceof MetadataStoreException.BadVersionException) {
+                            log.warn(
+                                    "Failed to delete authentication policies because of bad version. "
+                                            + "Retry to delete authentication policies for topic {}",
+                                    topic);
+                            deleteTopicAuthenticationWithRetry(topic, future, count - 1);
+                        } else {
+                            log.error("Failed to delete authentication policies for topic {}", topic, ex1);
+                            future.completeExceptionally(ex1);
+                        }
+                        return null;
+                    });
+        }).exceptionally(ex -> {
+            log.error("Failed to get policies for topic {}", topic, ex);
+            future.completeExceptionally(ex);
+            return null;
+        });
     }
 
     private CompletableFuture<Optional<Topic>> createNonPersistentTopic(String topic) {
@@ -1304,7 +1364,7 @@ public class BrokerService implements Closeable {
 
                                     return null;
                                 });
-                            } catch (NamingException | PulsarServerException e) {
+                            } catch (PulsarServerException e) {
                                 log.warn("Failed to create topic {}-{}", topic, e.getMessage());
                                 pulsar.getExecutor().execute(() -> topics.remove(topic, topicFuture));
                                 topicFuture.completeExceptionally(e);
@@ -2178,9 +2238,16 @@ public class BrokerService implements Closeable {
      */
     private void updateDynamicServiceConfiguration() {
         Optional<Map<String, String>> configCache = Optional.empty();
+
         try {
-            configCache =
-                    Optional.of(pulsar().getPulsarResources().getDynamicConfigResources().getDynamicConfiguration());
+            configCache  =
+                    pulsar().getPulsarResources().getDynamicConfigResources().getDynamicConfiguration();
+
+            // create dynamic-config if not exist.
+            if (!configCache.isPresent()) {
+                pulsar().getPulsarResources().getDynamicConfigResources()
+                        .setDynamicConfigurationWithCreate(n -> Maps.newHashMap());
+            }
         } catch (Exception e) {
             log.warn("Failed to read dynamic broker configuration", e);
         }

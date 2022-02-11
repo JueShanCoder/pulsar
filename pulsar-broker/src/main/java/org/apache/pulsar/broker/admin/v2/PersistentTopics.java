@@ -85,7 +85,7 @@ public class PersistentTopics extends PersistentTopicsBase {
             response = String.class, responseContainer = "List")
     @ApiResponses(value = {
             @ApiResponse(code = 401, message = "Don't have permission to administrate resources on this tenant"),
-            @ApiResponse(code = 403, message = "Don't have admin permission"),
+            @ApiResponse(code = 403, message = "Don't have admin or consume permission on namespace"),
             @ApiResponse(code = 404, message = "tenant/namespace/topic doesn't exit"),
             @ApiResponse(code = 412, message = "Namespace name is not valid"),
             @ApiResponse(code = 500, message = "Internal server error")})
@@ -111,7 +111,7 @@ public class PersistentTopics extends PersistentTopicsBase {
             response = String.class, responseContainer = "List")
     @ApiResponses(value = {
             @ApiResponse(code = 401, message = "Don't have permission to administrate resources on this tenant"),
-            @ApiResponse(code = 403, message = "Don't have admin permission"),
+            @ApiResponse(code = 403, message = "Don't have admin or consume permission on namespace"),
             @ApiResponse(code = 404, message = "tenant/namespace/topic doesn't exit"),
             @ApiResponse(code = 412, message = "Namespace name is not valid"),
             @ApiResponse(code = 500, message = "Internal server error")})
@@ -1329,7 +1329,7 @@ public class PersistentTopics extends PersistentTopicsBase {
         try {
             validateTopicName(tenant, namespace, topic);
             if (!topicName.isPersistent()) {
-                throw new RestException(Response.Status.BAD_REQUEST, "Create subscription on non-persistent topic"
+                throw new RestException(Response.Status.BAD_REQUEST, "Create subscription on non-persistent topic "
                         + "can only be done through client");
             }
             internalCreateSubscription(asyncResponse, decode(encodedSubName), messageId, authoritative, replicated);
